@@ -1,0 +1,60 @@
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+
+const MixerContext = createContext(null)
+
+export function MixerProvider({ children }){
+  const audioCtxRef = useRef(null)
+  const [ready, setReady] = useState(false)
+
+  // Group gains: AB and CD for the crossfader
+  const abGainRef = useRef(null)
+  const cdGainRef = useRef(null)
+
+  // Master gain (optional future use)
+  const masterGainRef = useRef(null)
+
+  useEffect(()=>{
+    // Build context lazily on first user interaction (resume policy)
+    const resume = () => {
+      if (!audioCtxRef.current){
+        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)()
+        masterGainRef.current = audioCtxRef.current.createGain()
+        abGainRef.current = audioCtxRef.current.createGain()
+        cdGainRef.current = audioCtxRef.current.createGain()
+
+        // route AB and CD into master, then to destination
+        abGainRef.current.connect(masterGainRef.current)
+        cdGainRef.current.connect(masterGainRef.current)
+        masterGainRef.current.connect(audioCtxRef.current.destination)
+
+        setReady(true)
+      }
+      // resume if suspended
+      audioCtxRef.current && audioCtxRef.current.resume()
+      window.removeEventListener('pointerdown', resume)
+      window.removeEventListener('keydown', resume)
+    }
+    window.addEventListener('pointerdown', resume)
+    window.addEventListener('keydown', resume)
+    return () => {
+      window.removeEventListener('pointerdown', resume)
+      window.removeEventListener('keydown', resume)
+    }
+  }, [])
+
+  const value = useMemo(()=> ({
+    get context(){ return audioCtxRef.current },
+    get masterGain(){ return masterGainRef.current },
+    get abGain(){ return abGainRef.current },
+    get cdGain(){ return cdGainRef.current },
+    ready,
+  }), [ready])
+
+  return <MixerContext.Provider value={value}>{children}</MixerContext.Provider>
+}
+
+export function useMixer(){
+  const ctx = useContext(MixerContext)
+  if (!ctx) throw new Error('useMixer must be used inside <MixerProvider>')
+  return ctx
+}
